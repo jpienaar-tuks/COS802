@@ -40,6 +40,7 @@ AfriSenti Datasets consists of 16 languages: Hausa, Yoruba , Igbo,  Nigerian_Pid
 
 In case you have any questions regarding AfriSenti dataset, please contact Shamsuddeen Muhammad for further information.
 email: shamsuddeen2004@gmail.com
+
 -----------------------------------------------------------
 
 
@@ -48,7 +49,7 @@ email: shamsuddeen2004@gmail.com
 If you plan to use the dataset for research or academic purposes, please cite the following publication. 
 
 
-
+```
 @InProceedings{muhammad-EtAl:2022:LREC,
   author = {Muhammad, Shamsuddeen Hassan and Adelani, David and Ruder, Sebastian and Ahmad, Ibrahim Sa'id and Abdulmumin, Idris and Bello, Shehu Bello and Choudhury, Monojit and Emezue, Chris Chinenye and Abdullahi, Saheed Salahuddeen and Aremu, Anuoluwapo and Jeorge, Alipio and Brazdil, Pavel},
   title = {NaijaSenti: A Nigerian Twitter Sentiment Corpus for Multilingual Sentiment Analysis},
@@ -74,6 +75,8 @@ If you plan to use the dataset for research or academic purposes, please cite th
     doi = "10.18653/v1/2020.coling-main.91",
     pages = "1048--1060",
 }
+```
+
 -----------------------------------------------------------
 
 version 1.0
