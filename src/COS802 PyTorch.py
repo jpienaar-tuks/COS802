@@ -35,7 +35,7 @@ def compute_metrics(pred):
 
 
 def strip_emojis(sentence):
-    """ Some of the model's I'll be evaluating aleardy contains emoji in their tokenizer. I'll therefore need to
+    """ Some of the model's I'll be evaluating already contains emoji in their tokenizer. I'll therefore need to
     strip the emoji's for the base case evaluations. Written Hausa does use some diacritics and possibly arabic 
     symbols, so I'll define emoji as anything where ord(c) returns a value above 9000"""
     s=[]
@@ -44,6 +44,39 @@ def strip_emojis(sentence):
             continue
         s.append(c)
     return ''.join(s)
+
+def make_and_train_model(model_name, checkpoint, scenario, classifier_only, train_ds, validation_ds):
+    model_pt = AutoModelForSequenceClassification.from_pretrained(checkpoint, num_labels=LABELS)
+    ## Parameters to be passed to Trainer https://huggingface.co/docs/transformers/main_classes/trainer
+    training_args = TrainingArguments(output_dir=os.path.join('..','results', scenario, model_name),
+                                      learning_rate=2e-5,
+                                      per_device_train_batch_size=batch_size,
+                                      per_device_eval_batch_size=batch_size,
+                                      num_train_epochs=num_epochs,
+                                      gradient_accumulation_steps=16,
+                                      weight_decay=0.01,
+                                      report_to = "none"
+                                      )
+    if classifier_only:
+        optimizer = AdamW(model_pt.classifier.parameters()) # Only want to train the classifier head
+        scheduler = get_constant_schedule_with_warmup(optimizer,0)
+        opt_kwargs = {"optimizers": (optimizer, scheduler)}
+    else:
+        opt_kwargs ={}
+    
+    trainer = Trainer(model=model_pt,
+                      args=training_args,
+                      train_dataset=train_ds,
+                      eval_dataset=validation_ds,
+                      tokenizer=tokenizer,
+                      data_collator=data_collator,
+                      compute_metrics = compute_metrics,
+                      **opt_kwargs
+                      )
+    results = trainer.train()
+    trainer.save_model(os.path.join('..','models',scenario,model_name))
+    performance =trainer.evaluate()
+    return results, performance
 
 def vocab_stats(df, tokenizer):
     # TODO
@@ -84,42 +117,53 @@ train_df, validation_df = train_test_split(hausa_no_emoji, test_size=0.1)
 dataset_train = Dataset.from_pandas(train_df)
 dataset_validation = Dataset.from_pandas(validation_df)
 
-history=dict()
+performance=dict()
 results=dict()
+scenario = 'classifier only'
 for model in models:
     tokenizer = AutoTokenizer.from_pretrained(model['checkpoint'])
     tokenized_dataset_train = dataset_train.map(preprocess_function, batched=True)
     tokenized_dataset_validation = dataset_validation.map(preprocess_function, batched=True)
-    model_pt = AutoModelForSequenceClassification.from_pretrained(model['checkpoint'], num_labels=LABELS)
     data_collator = DataCollatorWithPadding(tokenizer=tokenizer)
     
-    ## Parameters to be passed to Trainer https://huggingface.co/docs/transformers/main_classes/trainer
-    training_args = TrainingArguments(output_dir=os.path.join('..','results','classifier only',model['name']),
-                                      learning_rate=2e-5,
-                                      per_device_train_batch_size=batch_size,
-                                      per_device_eval_batch_size=batch_size,
-                                      num_train_epochs=num_epochs,
-                                      gradient_accumulation_steps=16,
-                                      weight_decay=0.01,
-                                      report_to = "none"
-                                      )
-    optimizer = AdamW(model_pt.classifier.parameters()) # Only want to train the classifier head
-    scheduler = get_constant_schedule_with_warmup(optimizer,0)
-    trainer = Trainer(model=model_pt,
-                      args=training_args,
-                      train_dataset=tokenized_dataset_train,
-                      eval_dataset=tokenized_dataset_validation,
-                      tokenizer=tokenizer,
-                      data_collator=data_collator,
-                      compute_metrics = compute_metrics,
-                      optimizers = (optimizer,scheduler)
-                      )
-    results[model['name']]=trainer.train()
-    trainer.save_model(os.path.join('..','models','classifier only',model['name']))
-    history[model['name']]=trainer.evaluate()
-    # Just some memory mangement, since I seem to occasionally seem to run out 
+    r, p = make_and_train_model(model['name'], model['checkpoint'], scenario, True, 
+                         tokenized_dataset_train, tokenized_dataset_validation)
+    performance[model['name']]=p
+    results[model['name']]=r
+    # Just some memory management, since I seem to occasionally seem to run out 
     # and old model data can be cleared
-    del trainer, model_pt
     torch.cuda.empty_cache()
     gc.collect()
+
+pd.DataFrame(performance).to_csv(f'{scenario} results.csv')
+pd.DataFrame({key: results[key][2] for key in results.keys()}).to_csv(f'{scenario} training report.csv')
+
+#------------------------------------------------------------------------------
+# Next scenario:
+# Now that we have trained the classifier heads, I want to examine the model
+# performance after language adaptive finetuning. I'll reload the models from
+# the previous step, but this time I'll train the entire model. I'll also reuse
+# the no_emoji dataset from the previous step
+#------------------------------------------------------------------------------
+
+performance=dict()
+results=dict()
+scenario = 'LAFT'
+for model in models:
+    tokenizer = AutoTokenizer.from_pretrained(model['checkpoint'])
+    tokenized_dataset_train = dataset_train.map(preprocess_function, batched=True)
+    tokenized_dataset_validation = dataset_validation.map(preprocess_function, batched=True)
+    data_collator = DataCollatorWithPadding(tokenizer=tokenizer)
+    checkpoint = os.path.join('..','models','classifier only',model['name'])
     
+    r, p = make_and_train_model(model['name'], checkpoint, scenario, False, 
+                         tokenized_dataset_train, tokenized_dataset_validation)
+    performance[model['name']]=p
+    results[model['name']]=r
+    # Just some memory management, since I seem to occasionally seem to run out 
+    # and old model data can be cleared
+    torch.cuda.empty_cache()
+    gc.collect()
+
+pd.DataFrame(performance).to_csv(f'{scenario} results.csv')
+pd.DataFrame({key: results[key][2] for key in results.keys()}).to_csv(f'{scenario} training report.csv')
