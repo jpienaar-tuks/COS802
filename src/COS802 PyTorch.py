@@ -9,10 +9,10 @@ the huggingface guides and tutorials are absed on pytorch, so I'm gonna switch o
 @author: Johann
 """
 import pandas as pd
-import os, gc
+import os, gc, json
 from transformers import AutoTokenizer, AutoModelForSequenceClassification
 from transformers import DataCollatorWithPadding, Trainer, TrainingArguments
-from transformers import AdamW, get_linear_schedule_with_warmup, get_constant_schedule_with_warmup
+from transformers import AdamW, get_constant_schedule_with_warmup
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import precision_recall_fscore_support, accuracy_score
 from datasets import Dataset
@@ -45,8 +45,10 @@ def strip_emojis(sentence):
         s.append(c)
     return ''.join(s)
 
-def make_and_train_model(model_name, checkpoint, scenario, classifier_only, train_ds, validation_ds):
+def make_and_train_model(model_name, checkpoint, scenario, classifier_only, train_ds, validation_ds, resize):
     model_pt = AutoModelForSequenceClassification.from_pretrained(checkpoint, num_labels=LABELS)
+    if resize:
+        model_pt.resize_token_embeddings(resize)
     ## Parameters to be passed to Trainer https://huggingface.co/docs/transformers/main_classes/trainer
     training_args = TrainingArguments(output_dir=os.path.join('..','results', scenario, model_name),
                                       learning_rate=2e-5,
@@ -79,8 +81,18 @@ def make_and_train_model(model_name, checkpoint, scenario, classifier_only, trai
     return results, performance
 
 def vocab_stats(df, tokenizer):
-    # TODO
-    pass
+    token2id = tokenizer.vocab
+    id2token = {value:key for key, value in token2id.items()}
+    token_counts = {idx: 0 for idx in id2token.keys()}
+    for idx, row in df.iterrows():
+        ids = tokenizer(row['before'])['input_ids']
+        for i in ids:
+            try:
+                token_counts[i]+=1
+            except KeyError:
+                token_counts[i]=1
+                print(f"Potential OOV token ID: {i}")
+    return token_counts, id2token
 
 #------------------------------------------------------------------------------
 # Just gonna setup some variables, read the main DataFrame, etc.
@@ -127,7 +139,7 @@ for model in models:
     data_collator = DataCollatorWithPadding(tokenizer=tokenizer)
     
     r, p = make_and_train_model(model['name'], model['checkpoint'], scenario, True, 
-                         tokenized_dataset_train, tokenized_dataset_validation)
+                         tokenized_dataset_train, tokenized_dataset_validation, False)
     performance[model['name']]=p
     results[model['name']]=r
     # Just some memory management, since I seem to occasionally seem to run out 
@@ -157,7 +169,47 @@ for model in models:
     checkpoint = os.path.join('..','models','classifier only',model['name'])
     
     r, p = make_and_train_model(model['name'], checkpoint, scenario, False, 
-                         tokenized_dataset_train, tokenized_dataset_validation)
+                         tokenized_dataset_train, tokenized_dataset_validation, False)
+    performance[model['name']]=p
+    results[model['name']]=r
+    # Just some memory management, since I seem to occasionally seem to run out 
+    # and old model data can be cleared
+    torch.cuda.empty_cache()
+    gc.collect()
+
+pd.DataFrame(performance).to_csv(f'{scenario} results.csv')
+pd.DataFrame({key: results[key][2] for key in results.keys()}).to_csv(f'{scenario} training report.csv')
+
+#------------------------------------------------------------------------------
+# Last scenario:
+# We'll be adding the emojis back in to examine the impact that it has on the 
+# sentiment analysis task. The xlm-roberta-base tokenizer already has emojis
+# in its vocab, but for the afriberta models we'll have to add it in. 
+#------------------------------------------------------------------------------
+
+train_df, validation_df = train_test_split(hausa_df, test_size=0.1)
+
+dataset_train = Dataset.from_pandas(train_df)
+dataset_validation = Dataset.from_pandas(validation_df)
+
+with open('emoji ords.json','rt') as f:
+    emoji_ords=json.load(f)
+
+performance=dict()
+results=dict()
+scenario = 'emoji incl'
+for model in models:
+    tokenizer = AutoTokenizer.from_pretrained(model['checkpoint'])
+    if 'afriberta' in model['checkpoint']:
+        added = tokenizer.add_tokens([chr(i) for i in emoji_ords])
+        print(f'Added {added} tokens to tokenizer')
+    tokenized_dataset_train = dataset_train.map(preprocess_function, batched=True)
+    tokenized_dataset_validation = dataset_validation.map(preprocess_function, batched=True)
+    data_collator = DataCollatorWithPadding(tokenizer=tokenizer)
+    checkpoint = os.path.join('..','models','LAFT',model['name'])
+    resize = len(tokenizer)
+    r, p = make_and_train_model(model['name'], checkpoint, scenario, False, 
+                         tokenized_dataset_train, tokenized_dataset_validation, resize)
     performance[model['name']]=p
     results[model['name']]=r
     # Just some memory management, since I seem to occasionally seem to run out 

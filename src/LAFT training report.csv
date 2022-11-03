@@ -1,0 +1,7 @@
+,Afriberta-small,Afriberta-base,xlm-roberta-base
+train_runtime,284.3105,506.3205,1066.445
+train_samples_per_second,112.159,62.98,29.901
+train_steps_per_second,1.752,0.984,0.467
+total_flos,592025173934400.0,1171892487700800.0,1738626741890136.0
+train_loss,0.6136056065080635,0.5791557955454631,0.7593434038889935
+epoch,2.0,2.0,2.0
