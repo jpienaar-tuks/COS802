@@ -53,4 +53,6 @@ for i, ordinal in enumerate(emoji_ords):
     emoji_export.append(row)
 pd.DataFrame(emoji_export, columns=['Emoji','Hausa word 1','Hausa word 2','Hausa word 3','Hausa word 4','Hausa word 5',
                                     'English word 1','English word 2','English word 3','English word 4','English word 5',]).to_csv('Emoji similarity export.csv')
+
+
         
